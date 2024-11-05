@@ -16,6 +16,7 @@ fn main() -> ExitCode {
 }
 
 fn init() {}
+
 fn main_loop() {
     loop {
         let wd = std::env::current_dir().expect("Error getting current working directory");
@@ -36,6 +37,22 @@ fn main_loop() {
     }
 }
 
+struct Args {
+    command: String,
+    args: Vec<String>,
+}
+
+fn parse_args(line: String) -> Args {
+    let args: Vec<_> = line.split_whitespace().map(|s| s.to_string()).collect();
+    let command = args.get(0).cloned().unwrap_or_default();
+    let rest = args.into_iter().skip(1).collect();
+
+    Args {
+        command,
+        args: rest,
+    }
+}
+
 fn execute(args: Args) -> i32 {
     if args.command != "" {
         if BUILTINS.contains(&args.command.as_str()) {
@@ -49,12 +66,20 @@ fn execute(args: Args) -> i32 {
 }
 
 fn launch(args: Args) -> i32 {
-    let mut child = Command::new(args.command)
-        .args(args.args)
-        .spawn()
-        .expect("failed to spawn the target process"); // TODO insead of panic print to standart output
+    let child = Command::new(&args.command).args(args.args).spawn();
 
-    let _result = child.wait().unwrap(); // TODO insead of panic print to standart output
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            match e.kind() {
+                io::ErrorKind::NotFound => eprintln!("command '{}' was not found", args.command),
+                other => eprintln!("Error running command {}, reason: {}", args.command, other),
+            }
+            return 1;
+        }
+    };
+
+    let _result = child.wait().expect("command wasn't running");
 
     return 1;
 }
@@ -64,7 +89,7 @@ fn execute_built_in(args: Args) -> i32 {
         "cd" => execute_cd(args.args),
         "ls" => execute_ls(args.args),
         "exit" => 0,
-        _ => panic!("unkown command"), // TODO
+        _ => panic!("Should never get here"),
     }
 }
 
@@ -82,7 +107,7 @@ fn execute_ls(_args: Vec<String>) -> i32 {
     let dirs: Vec<_> = fs::read_dir(wd)
         .expect("Error reading directories")
         .into_iter()
-        .filter(|r| r.is_ok()) // Get rid of Err variants for Result<DirEntry>
+        .filter(|r| r.is_ok())
         .map(|dir_entry| {
             dir_entry
                 .unwrap()
@@ -102,20 +127,4 @@ fn execute_ls(_args: Vec<String>) -> i32 {
     io::stdout().flush().unwrap();
 
     1
-}
-
-struct Args {
-    command: String,
-    args: Vec<String>,
-}
-
-fn parse_args(line: String) -> Args {
-    let args: Vec<_> = line.split_whitespace().map(|s| s.to_string()).collect();
-    let command = args.get(0).cloned().unwrap_or_default();
-    let rest = args.into_iter().skip(1).collect();
-
-    Args {
-        command,
-        args: rest,
-    }
 }
